@@ -194,6 +194,8 @@ func callbackHandler(w http.ResponseWriter, r *http.Request) {
                     } else {
                         replyTextMessage(event, "一對一聊天無法離開")
                     }
+                case "getid":
+                    replyTextMessage(event, id)
                 case "version":
                     replyTextMessage(event, _version)
                 default:
@@ -214,7 +216,7 @@ func triggerHandler(w http.ResponseWriter, r *http.Request) {
         fmt.Fprintf(w, "Format unaccepted.")
         return
     }
-    args := strings.Split(defects, " ")
+    args := strings.Split(defects, ",")
     response := inspect(id, args)
     message := linebot.NewTextMessage("🔔手動觸發訊息🔔\n\n" + response)
     bot.PushMessage(id, message).Do()
@@ -222,9 +224,8 @@ func triggerHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func addSubscriber(id string, arguments []string) (int, error) {
-    defectReg, _ := regexp.Compile(`^(D\d{2})$`)
     for _, argument := range arguments {
-        if match := defectReg.MatchString(argument); !match {
+        if !matchString(`^(D\d{2})$`, argument) {
             return 3, errors.New("")
         }
     }
@@ -267,9 +268,8 @@ func addSubscriber(id string, arguments []string) (int, error) {
 }
 
 func removeSubscriber(id string, arguments []string) (int, error) {
-    defectReg, _ := regexp.Compile(`^D\d{2}|all$`)
     for _, argument := range arguments {
-        if match := defectReg.MatchString(argument); !match {
+        if !matchString(`^D\d{2}|all$`, argument) {
             return 3, errors.New("")
         }
     }
@@ -333,9 +333,8 @@ func replyAllSubscribe(id string) string {
 }
 
 func inspect(id string, arguments []string) string {
-    defectReg, _ := regexp.Compile(`^D\d{2}|all$`)
     for _, argument := range arguments {
-        if match := defectReg.MatchString(argument); !match {
+        if !matchString(`^D\d{2}|all$`, argument) {
             return "命令格式不正確"
         }
     }
