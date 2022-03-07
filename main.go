@@ -33,13 +33,6 @@ var rdb *sql.DB
 var defectnames map[string]string
 
 func main() {
-    defer func() {
-        fmt.Println("Place breakpoint here")
-        if recovered := recover(); recovered != nil {
-            fmt.Println("Handled panic:", recovered)
-        }
-    }()
-
     // Load ENVs
     err := godotenv.Load()
     if err != nil {
@@ -190,7 +183,7 @@ func callbackHandler(w http.ResponseWriter, r *http.Request) {
                         break
                     }
                 case "help":
-                    replyTextMessage(event, "sub <mark_ids> - 訂閱缺陷種類，以收到排程訊息。參數留空為訂閱全部\nunsub <all | mark_ids> - 取消訂閱缺陷種類。參數留空為取消訂閱全部，參數all為刪除所有記錄\nlist - 顯示目前訂閱狀況\ninspect <all | mark_ids> - 手動調閱資料。參數留空為調閱已訂閱的缺陷資料，參數all為調閱所有缺陷之資料\nleave - 離開群聊或群組\n\nmark_ids格式為D開頭接兩位數字，批量操作可用空白分開。例如：D00 D11 D22")
+                    replyTextMessage(event, _help)
                 case "leave":
                     if first := string(id[0]); first == "C" {
                         log.Println("Group " + id + " wants bot to leave.")
@@ -201,6 +194,8 @@ func callbackHandler(w http.ResponseWriter, r *http.Request) {
                     } else {
                         replyTextMessage(event, "一對一聊天無法離開")
                     }
+                case "version":
+                    replyTextMessage(event, _version)
                 default:
                     replyTextMessage(event, "未知的命令，輸入help查看指令幫助")
                 }
@@ -215,9 +210,7 @@ func triggerHandler(w http.ResponseWriter, r *http.Request) {
     vars := mux.Vars(r)
     id := vars["id"]
     defects := vars["defects"]
-    match1, _ := regexp.MatchString(`^(U|R|C)(\w{32})$`, id)
-    match2, _ := regexp.MatchString(`^(all|D\d{2})(,(all|D\d{2}))*$`, defects)
-    if !match1 || !match2 {
+    if !matchString(`^(U|R|C)(\w{32})$`, id) || matchString(`^(all|D\d{2})(,(all|D\d{2}))*$`, defects) {
         fmt.Fprintf(w, "Format unaccepted.")
         return
     }
@@ -617,4 +610,10 @@ func contains(s []string, str string) bool {
     }
 
     return false
+}
+
+func matchString(pattern string, s string) bool {
+    match, err := regexp.MatchString(pattern, s)
+    checkError(err)
+    return match
 }
