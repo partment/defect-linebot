@@ -519,7 +519,11 @@ func checkENV() bool {
             }
         }
         if env._type == reflect.String && env.regexp != "" {
-            if match, _ := regexp.MatchString(env.regexp, os.Getenv(env.name)); !match && !env.allowEmpty {
+            if os.Getenv(env.name) == "" && env.allowEmpty {
+                return false
+            }
+            if match, _ := regexp.MatchString(env.regexp, os.Getenv(env.name)); !match {
+                log.Fatal(env.name + " is not matching it's regexp.")
                 return true
             }
         }
@@ -563,6 +567,8 @@ func intialRemoteDatabase() *sql.DB {
     }
 
     db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", databaseAuth["User"], databaseAuth["Password"], databaseAuth["Host"], 3306, databaseAuth["Name"]))
+    checkError(err)
+    _, err = db.Exec("do 1")
 
     if err != nil {
         log.Fatal("Loading remote database error : ", err)
@@ -571,15 +577,14 @@ func intialRemoteDatabase() *sql.DB {
         log.Println("Remote database established.")
     }
 
-    stmt, _ := db.Prepare("select * from roadmark")
-    rows, err := stmt.Query()
-
+    stmt, err := db.Prepare("select * from roadmark")
     if err != nil {
         log.Fatal("Loading roadmarks failed : ", err)
         os.Exit(1)
     } else {
         log.Println("Loaded roadmarks")
     }
+    rows, _ := stmt.Query()
 
     defer stmt.Close()
 
