@@ -545,13 +545,14 @@ func intialLocalDatabase() *sql.DB {
     }
 
     sql_table := `
-    CREATE TABLE IF NOT EXISTS subscriber(
-        id varchar(33) PRIMARY KEY,
-        subscribe varchar(3)
+    CREATE TABLE IF NOT EXISTS "subscriber" (
+        "id"	varchar(33) PRIMARY KEY,
+        "subscribe"	varchar(3),
         CONSTRAINT "id_subscribe" UNIQUE("id","subscribe")
     );
     `
-    db.Exec(sql_table)
+    _, err = db.Exec(sql_table)
+    checkError(err)
 
     return db
 
