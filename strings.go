@@ -1,6 +1,6 @@
 package main
 
-var _version string = "1.0.1"
+var _version string = "1.0.2"
 
 var _help string = `sub <mark_ids> - 訂閱缺陷種類，以收到排程訊息。參數留空為訂閱全部
 unsub <all | mark_ids> - 取消訂閱缺陷種類。參數留空為取消訂閱全部，參數all為刪除所有記錄
