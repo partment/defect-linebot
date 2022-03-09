@@ -423,7 +423,7 @@ func retriveDefectNum(id string, arguments []string) []Defect {
 }
 
 func cronJob() {
-    cronTabs := strings.Split(os.Getenv("Crontab"), ",")
+    cronTabs := strings.Split(os.Getenv("Crontab"), ";")
     cronJob := cron.New()
     for _, cronTab := range cronTabs {
         cronJob.AddFunc(cronTab, routineJob)
@@ -490,19 +490,20 @@ func checkENV() bool {
     */
 
     envList := [...]struct {
-        name       string
-        _type      reflect.Kind
-        regexp     string
-        allowEmpty bool
+        name                string
+        _type               reflect.Kind
+        regexp              string
+        allowEmpty          bool
+        multiValueSeperator string
     }{
-        {"ChannelSecret", reflect.String, ``, false},
-        {"ChannelAccessToken", reflect.String, ``, false},
-        {"CallbackPort", reflect.Int, ``, false},
-        {"DatabaseHost", reflect.String, ``, false},
-        {"DatabaseUser", reflect.String, ``, false},
-        {"DatabasePassword", reflect.String, ``, false},
-        {"DatabaseName", reflect.String, ``, false},
-        {"Crontab", reflect.String, `^((@(annually|yearly|monthly|weekly|daily|hourly|reboot))|(@every (\d+(ns|us|µs|ms|s|m|h))+)|((((\d+,)+\d+|(\d+(\/|-)\d+)|\d+|\*) ?){5,7}))(,((@(annually|yearly|monthly|weekly|daily|hourly|reboot))|(@every (\d+(ns|us|µs|ms|s|m|h))+)|((((\d+,)+\d+|(\d+(\/|-)\d+)|\d+|\*) ?){5,7})))*$`, true},
+        {"ChannelSecret", reflect.String, ``, false, ``},
+        {"ChannelAccessToken", reflect.String, ``, false, ``},
+        {"CallbackPort", reflect.Int, ``, false, ``},
+        {"DatabaseHost", reflect.String, ``, false, ``},
+        {"DatabaseUser", reflect.String, ``, false, ``},
+        {"DatabasePassword", reflect.String, ``, false, ``},
+        {"DatabaseName", reflect.String, ``, false, ``},
+        {"Crontab", reflect.String, `^((((\d+,)+\d+|(\d+(\/|-|#)\d+)|\d+L?|\*(\/\d+)?|L(-\d+)?|\?|[A-Z]{3}(-[A-Z]{3})?) ?){5,7})$|(@(annually|yearly|monthly|weekly|daily|hourly|reboot))|(@every (\d+(ns|us|µs|ms|s|m|h))+)`, true, `;`},
     }
 
     for _, env := range envList {
@@ -522,9 +523,19 @@ func checkENV() bool {
             if os.Getenv(env.name) == "" && env.allowEmpty {
                 return false
             }
-            if match, _ := regexp.MatchString(env.regexp, os.Getenv(env.name)); !match {
-                log.Fatal(env.name + " is not matching it's regexp.")
-                return true
+            if env.multiValueSeperator != "" {
+                envSeperateds := strings.Split(os.Getenv(env.name), env.multiValueSeperator)
+                for _, envSeperated := range envSeperateds {
+                    if match, _ := regexp.MatchString(env.regexp, envSeperated); !match {
+                        log.Fatal(env.name + " is not matching it's regexp.")
+                        return true
+                    }
+                }
+            } else {
+                if match, _ := regexp.MatchString(env.regexp, os.Getenv(env.name)); !match {
+                    log.Fatal(env.name + " is not matching it's regexp.")
+                    return true
+                }
             }
         }
     }
