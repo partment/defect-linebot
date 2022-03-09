@@ -369,20 +369,20 @@ func retriveDefectNum(id string, arguments []string) []Defect {
     var err error
 
     if contains(arguments, "all") { // Retrive All Types
-        stmt, _ = rtx.Prepare("select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', 'Asia/Taipei') and convert_tz(now(), 'system', 'Asia/Taipei') group by markid")
+        stmt, _ = rtx.Prepare("select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') group by markid")
         rows, err = stmt.Query()
     } else if len(arguments) >= 1 { // Retrive Specific Types
         args := make([]interface{}, len(arguments))
         for i, argument := range arguments {
             args[i] = argument
         }
-        stmt, _ = rtx.Prepare(`select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', 'Asia/Taipei') and convert_tz(now(), 'system', 'Asia/Taipei') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) group by markid`)
+        stmt, _ = rtx.Prepare(`select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) group by markid`)
         rows, err = stmt.Query(args...)
     } else { // Retrive Subscribed Types
         var all int
         tx.QueryRow("select count(*) from subscriber where `id` = ? and `subscribe` = 'all'", id).Scan(&all)
         if all == 1 {
-            stmt, _ = rtx.Prepare("select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', 'Asia/Taipei') and convert_tz(now(), 'system', 'Asia/Taipei') group by markid")
+            stmt, _ = rtx.Prepare("select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') group by markid")
             rows, err = stmt.Query()
         } else {
             // Get User's Subscribing List and Search
@@ -403,7 +403,7 @@ func retriveDefectNum(id string, arguments []string) []Defect {
             for i, subscribe := range subscribes {
                 args[i] = subscribe
             }
-            stmt, _ = rtx.Prepare(`select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', 'Asia/Taipei') and convert_tz(now(), 'system', 'Asia/Taipei') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) group by markid`)
+            stmt, _ = rtx.Prepare(`select markid, count(markid) from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) group by markid`)
             rows, err = stmt.Query(args...)
         }
     }
