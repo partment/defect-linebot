@@ -434,10 +434,8 @@ func cronJob() {
 func routineJob() {
     log.Println("Start cron job.")
     tx, _ := db.Begin()
-    rtx, _ := rdb.Begin()
     defer func() {
         tx.Commit()
-        rtx.Commit()
     }()
 
     var stmt *sql.Stmt
