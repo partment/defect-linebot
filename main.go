@@ -2,6 +2,7 @@ package main
 
 import (
     "database/sql"
+    "encoding/json"
     "errors"
     "fmt"
     "log"
@@ -11,9 +12,11 @@ import (
     "regexp"
     "strconv"
     "strings"
+    "time"
 
     _ "github.com/go-sql-driver/mysql"
     "github.com/gorilla/mux"
+    "github.com/icza/dyno"
     "github.com/joho/godotenv"
     "github.com/line/line-bot-sdk-go/v7/linebot"
     _ "github.com/mattn/go-sqlite3"
@@ -170,7 +173,7 @@ func callbackHandler(w http.ResponseWriter, r *http.Request) {
                         return
                     }
 
-                    replyTextMessage(event, inspect(id, arguments))
+                    replyFlexMessage(event, `缺陷詳情`, inspect(id, arguments))
                     if contains(arguments, "all") {
                         log.Println(fmt.Sprintf("User %s inspected all types of defect.", id))
                         break
@@ -180,6 +183,30 @@ func callbackHandler(w http.ResponseWriter, r *http.Request) {
                         break
                     } else {
                         log.Println(fmt.Sprintf("User %s inspected subscribed.", id))
+                        break
+                    }
+                case "summary":
+                    arguments, err := argumentSplitter(commandParameters)
+                    if err != nil {
+                        replyTextMessage(event, "指令結尾不可為空白")
+                        return
+                    }
+
+                    if response := summary(id, arguments); response != nil {
+                        replyFlexMessage(event, `缺陷彙整`, response)
+                    } else {
+                        replyTextMessage(event, `命令格式不正確`)
+                    }
+
+                    if contains(arguments, "all") {
+                        log.Println(fmt.Sprintf("User %s summarized all types of defect.", id))
+                        break
+                    }
+                    if len(arguments) >= 1 {
+                        log.Println(fmt.Sprintf("User %s summarized %s.", id, strings.Join(arguments, " ")))
+                        break
+                    } else {
+                        log.Println(fmt.Sprintf("User %s summarized subscribed.", id))
                         break
                     }
                 case "help":
@@ -212,14 +239,23 @@ func triggerHandler(w http.ResponseWriter, r *http.Request) {
     vars := mux.Vars(r)
     id := vars["id"]
     defects := vars["defects"]
-    if !matchString(`^(U|R|C)(\w{32})$`, id) || matchString(`^(all|D\d{2})(,(all|D\d{2}))*$`, defects) {
+    if !matchString(`^(U|R|C)(\w{32})$`, id) || (!matchString(`^(all|D\d{2})(.(all|D\d{2}))*$`, defects) && defects != "") {
         fmt.Fprintf(w, "Format unaccepted.")
         return
     }
-    args := strings.Split(defects, ",")
+
+    var args []string
+    if defects != "" {
+        args = strings.Split(defects, ".")
+    }
+
     response := inspect(id, args)
-    message := linebot.NewTextMessage("🔔手動觸發訊息🔔\n\n" + response)
-    bot.PushMessage(id, message).Do()
+    message := linebot.NewFlexMessage("缺陷詳情", response)
+    var err error
+    if _, err = bot.PushMessage(id, message).Do(); err != nil {
+        log.Println(err)
+    }
+
     fmt.Fprintf(w, "Request success.")
 }
 
@@ -332,28 +368,159 @@ func replyAllSubscribe(id string) string {
     return response
 }
 
-func inspect(id string, arguments []string) string {
+func inspect(id string, arguments []string) linebot.FlexContainer {
+    // Check integrity of arguments
     for _, argument := range arguments {
         if !matchString(`^D\d{2}|all$`, argument) {
-            return "命令格式不正確"
+            return nil
         }
     }
 
-    response := "過去一小時內："
+    // Initial empty flexbox for line
+    flexJson := []byte(`{"type":"carousel","contents":[]}`)
+    var flex interface{}
+    json.Unmarshal(flexJson, &flex)
+
+    t := time.Now()
+
+    defectDetails := retriveDefectDetail(id, arguments)
+    if len(defectDetails) == 0 {
+        // Item insert to flexbox
+        listItemJson := []byte(fmt.Sprintf(`{"type":"bubble","size":"kilo","body":{"type":"box","layout":"vertical","contents":[{"type":"text","text":"生成時間 %s","color":"#aaaaaa","size":"sm"},{"type":"text","text":"過去一小時內","size":"xl"},{"type":"text","text":"沒有新增任何資料","size":"xl"}],"alignItems":"center","justifyContent":"center"}}`, t.Format("2006-01-02 15:04:05")))
+        var listItem interface{}
+        json.Unmarshal(listItemJson, &listItem)
+        dyno.Append(flex, listItem, "contents")
+    } else {
+        for _, defectDetail := range defectDetails {
+            var listItemJson []byte
+            var defectTypeName string
+            if defectnames[defectDetail.markid] == "" {
+                defectTypeName = defectDetail.markid
+            } else {
+                defectTypeName = defectnames[defectDetail.markid] + `(` + defectDetail.markid + `)`
+            }
+            photoPreviewUri := fmt.Sprintf(`https://%s/v1/get/img/%s/previews/%s`, os.Getenv("ImageAPIHost"), strings.Replace(defectDetail.markdate, "-", "", -1), defectDetail.photo)
+            photoUri := fmt.Sprintf(`https://%s/v1/get/img/%s/originals/%s`, os.Getenv("ImageAPIHost"), strings.Replace(defectDetail.markdate, "-", "", -1), defectDetail.photo)
+            gps := fmt.Sprintf(`%s,%s`, defectDetail.gps_y, defectDetail.gps_x)
+
+            // Item insert to flexbox
+            listItemJson = []byte(fmt.Sprintf(`{"type":"bubble","size":"kilo","hero":{"type":"box","layout":"vertical","contents":[{"type":"image","url":"%s","size":"full","aspectMode":"cover","aspectRatio":"16:9","action":{"type":"uri","label":"action","uri":"%s"}},{"type":"image","url":"https://dev.virtualearth.net/REST/V1/Imagery/Map/Road/%s/18?mapSize=800,450&format=jpeg&pushpin=%s;90;&key=AmkZpObWs0kj2Yu2XYjj85i3qz_JZYzXQ_W26LYkFJtPY0Hw029eIWEJivjhGx0E","size":"full","aspectMode":"cover","aspectRatio":"16:9","action":{"type":"uri","label":"action","uri":"http://www.google.com/maps/place/%s"}}]},"body":{"type":"box","layout":"vertical","contents":[{"type":"box","layout":"horizontal","contents":[{"type":"text","text":"%s","weight":"bold","size":"lg","wrap":true},{"type":"text","text":"%s %s","color":"#aaaaaa","size":"sm","align":"end","flex":0}],"alignItems":"center"},{"type":"box","layout":"baseline","contents":[{"type":"icon","size":"xs","url":"https://akveo.github.io/eva-icons/outline/png/128/hash-outline.png"},{"type":"text","text":"%s","size":"md","color":"#8c8c8c","flex":0,"margin":"sm"}],"alignItems":"center"},{"type":"box","layout":"baseline","contents":[{"type":"icon","size":"xs","url":"https://akveo.github.io/eva-icons/outline/png/128/pin-outline.png"},{"type":"text","text":"%s","size":"md","color":"#8c8c8c","flex":0,"margin":"sm"}],"alignItems":"center","action":{"type":"uri","label":"action","uri":"http://www.google.com/maps/place/%s"}},{"type":"box","layout":"vertical","contents":[{"type":"box","layout":"baseline","spacing":"sm","contents":[{"type":"icon","size":"xs","url":"https://akveo.github.io/eva-icons/outline/png/128/map-outline.png"},{"type":"text","text":"%s","wrap":true,"color":"#8c8c8c","size":"md","flex":5}]}]}],"spacing":"sm","paddingAll":"13px"}}`, photoPreviewUri, photoUri, gps, gps, gps, defectTypeName, defectDetail.markdate, defectDetail.marktime, defectDetail.seq_id, gps, gps, defectDetail.address))
+            var listItem interface{}
+            json.Unmarshal(listItemJson, &listItem)
+            dyno.Append(flex, listItem, "contents")
+        }
+    }
+
+    // Interface to line flex struct
+    flexResult, _ := json.Marshal(flex)
+    container, _ := linebot.UnmarshalFlexMessageJSON(flexResult)
+
+    return container
+}
+
+func retriveDefectDetail(id string, arguments []string) []DefectDetail {
+    tx, _ := db.Begin()
+    rtx, _ := rdb.Begin()
+    defer func() {
+        tx.Commit()
+        rtx.Commit()
+    }()
+
+    var stmt *sql.Stmt
+    var rows *sql.Rows
+    var err error
+
+    if contains(arguments, "all") { // Retrive All Types
+        stmt, _ = rtx.Prepare("select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') order by marktime, seq_id")
+        rows, err = stmt.Query()
+    } else if len(arguments) >= 1 { // Retrive Specific Types
+        args := make([]interface{}, len(arguments))
+        for i, argument := range arguments {
+            args[i] = argument
+        }
+        stmt, _ = rtx.Prepare(`select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) order by marktime, seq_id`)
+        rows, err = stmt.Query(args...)
+    } else { // Retrive Subscribed Types
+        var all int
+        tx.QueryRow("select count(*) from subscriber where `id` = ? and `subscribe` = 'all'", id).Scan(&all)
+        if all == 1 {
+            stmt, _ = rtx.Prepare("select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') order by marktime, seq_id")
+            rows, err = stmt.Query()
+        } else {
+            // Get User's Subscribing List and Search
+            subscribing, _ := tx.Query("select subscribe from subscriber where `id` = ?", id)
+            subscribes := []string{}
+            rowNums := 0
+            defer subscribing.Close()
+            for subscribing.Next() {
+                var subscribe string
+                subscribing.Scan(&subscribe)
+                subscribes = append(subscribes, subscribe)
+                rowNums += 1
+            }
+            if rowNums == 0 {
+                return []DefectDetail{}
+            }
+            args := make([]interface{}, len(subscribes))
+            for i, subscribe := range subscribes {
+                args[i] = subscribe
+            }
+            stmt, _ = rtx.Prepare(`select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) order by marktime, seq_id`)
+            rows, err = stmt.Query(args...)
+        }
+    }
+
+    checkError(err)
+    defer func() {
+        stmt.Close()
+        rows.Close()
+    }()
+
+    var defectDetails []DefectDetail
+    for rows.Next() {
+        var defectDetail DefectDetail
+        err = rows.Scan(&defectDetail.seq_id, &defectDetail.markid, &defectDetail.markdate, &defectDetail.marktime, &defectDetail.gps_y, &defectDetail.gps_x, &defectDetail.address, &defectDetail.photo)
+        checkError(err)
+        defectDetails = append(defectDetails, defectDetail)
+    }
+
+    return defectDetails
+}
+
+func summary(id string, arguments []string) linebot.FlexContainer {
+    for _, argument := range arguments {
+        if !matchString(`^D\d{2}|all$`, argument) {
+            return nil
+        }
+    }
+
+    t := time.Now()
+    flexJson := []byte(fmt.Sprintf(`{"type":"bubble","body":{"type":"box","layout":"vertical","contents":[{"type":"text","text":"彙整","weight":"bold","size":"xxl","margin":"md"},{"type":"box","layout":"horizontal","contents":[{"type":"text","text":"生成時間","size":"sm","color":"#aaaaaa","flex":0,"margin":"none"},{"type":"text","text":"%s","size":"xs","color":"#aaaaaa","offsetStart":"md"}]},{"type":"separator","margin":"xxl"},{"type":"box","layout":"vertical","margin":"lg","spacing":"sm","contents":[]}]},"footer":{"type":"box","layout":"baseline","contents":[{"type":"text","text":"*前一小時內","align":"end","size":"xs","color":"#aaaaaa"}]},"styles":{"footer":{"separator":true}}}`, t.Format("2006-01-02 15:04:05")))
+    var flex interface{}
+    json.Unmarshal(flexJson, &flex)
+
     defects := retriveDefectNum(id, arguments)
     if len(defects) == 0 {
-        response += "\n沒有新增任何資料"
-        return response
-    }
-    for _, defect := range defects {
-        if defectnames[defect.markid] == "" {
-            response += "\n" + defect.markid + "新增了" + strconv.Itoa(defect.num) + "筆資料"
-        } else {
-            response += "\n" + defectnames[defect.markid] + "(" + defect.markid + ")新增了" + strconv.Itoa(defect.num) + "筆資料"
+        listItemJson := []byte(`{"type":"text","text":"沒有任何資料"}`)
+        var listItem interface{}
+        json.Unmarshal(listItemJson, &listItem)
+        dyno.Append(flex, listItem, "body", "contents", 3, "contents")
+    } else {
+        for _, defect := range defects {
+            var listItemJson []byte
+            if defectnames[defect.markid] == "" {
+                listItemJson = []byte(fmt.Sprintf(`{"type":"box","layout":"horizontal","contents":[{"type":"text","text":"%s","size":"sm","color":"#555555","flex":0},{"type":"text","text":"%s筆","size":"sm","color":"#111111","align":"end"}]}`, defect.markid, strconv.Itoa(defect.num)))
+            } else {
+                listItemJson = []byte(fmt.Sprintf(`{"type":"box","layout":"horizontal","contents":[{"type":"text","text":"%s(%s)","size":"sm","color":"#555555","flex":0},{"type":"text","text":"%s筆","size":"sm","color":"#111111","align":"end"}]}`, defectnames[defect.markid], defect.markid, strconv.Itoa(defect.num)))
+            }
+            var listItem interface{}
+            json.Unmarshal(listItemJson, &listItem)
+            dyno.Append(flex, listItem, "body", "contents", 3, "contents")
         }
     }
-
-    return response
+    flexResult, _ := json.Marshal(flex)
+    container, _ := linebot.UnmarshalFlexMessageJSON(flexResult)
+    return container
 }
 
 func retriveDefectNum(id string, arguments []string) []Defect {
@@ -409,7 +576,10 @@ func retriveDefectNum(id string, arguments []string) []Defect {
     }
 
     checkError(err)
-    defer rows.Close()
+    defer func() {
+        stmt.Close()
+        rows.Close()
+    }()
 
     var defects []Defect
     for rows.Next() {
@@ -456,14 +626,24 @@ func routineJob() {
 
     for _, id := range idList {
         response := inspect(id, []string{})
-        message := linebot.NewTextMessage("🔔排程訊息🔔\n\n" + response)
-        bot.PushMessage(id, message).Do()
+        message := linebot.NewFlexMessage("缺陷詳情", response)
+        var err error
+        if _, err = bot.PushMessage(id, message).Do(); err != nil {
+            log.Println(err)
+        }
     }
 }
 
 func replyTextMessage(event *linebot.Event, response string) {
     var err error
     if _, err = bot.ReplyMessage(event.ReplyToken, linebot.NewTextMessage(response)).Do(); err != nil {
+        log.Println(err)
+    }
+}
+
+func replyFlexMessage(event *linebot.Event, altText string, response linebot.FlexContainer) {
+    var err error
+    if _, err = bot.ReplyMessage(event.ReplyToken, linebot.NewFlexMessage(altText, response)).Do(); err != nil {
         log.Println(err)
     }
 }
