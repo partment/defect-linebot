@@ -387,6 +387,7 @@ func inspect(id string, arguments []string) linebot.FlexContainer {
     t := time.Now()
 
     defectDetails := retriveDefectDetail(id, arguments)
+    defects := retriveDefectNum(id, arguments)
     if len(defectDetails) == 0 {
         // Item insert to flexbox
         listItemJson := []byte(fmt.Sprintf(`{"type":"bubble","size":"kilo","body":{"type":"box","layout":"vertical","contents":[{"type":"text","text":"生成時間 %s","color":"#aaaaaa","size":"sm"},{"type":"text","text":"過去一小時內","size":"xl"},{"type":"text","text":"沒有新增任何資料","size":"xl"}],"alignItems":"center","justifyContent":"center"}}`, t.Format("2006-01-02 15:04:05")))
@@ -394,6 +395,24 @@ func inspect(id string, arguments []string) linebot.FlexContainer {
         json.Unmarshal(listItemJson, &listItem)
         dyno.Append(flex, listItem, "contents")
     } else {
+        // Summary
+        summaryJson := []byte(fmt.Sprintf(`{"type":"bubble","size":"kilo","body":{"type":"box","layout":"vertical","contents":[{"type":"text","text":"彙整","weight":"bold","size":"xxl","margin":"md"},{"type":"box","layout":"horizontal","contents":[{"type":"text","text":"生成時間","size":"sm","color":"#aaaaaa","flex":0,"margin":"none"},{"type":"text","text":"%s","size":"xs","color":"#aaaaaa","offsetStart":"md"}]},{"type":"separator","margin":"xxl"},{"type":"box","layout":"vertical","margin":"lg","spacing":"sm","contents":[]}]},"footer":{"type":"box","layout":"baseline","contents":[{"type":"text","text":"*前一小時內","align":"end","size":"xs","color":"#aaaaaa"}]},"styles":{"footer":{"separator":true}}}`, t.Format("2006-01-02 15:04:05")))
+        var summaryTemplate interface{}
+        json.Unmarshal(summaryJson, &summaryTemplate)
+        for _, defect := range defects {
+            var listItemJson []byte
+            if defectnames[defect.markid] == "" {
+                listItemJson = []byte(fmt.Sprintf(`{"type":"box","layout":"horizontal","contents":[{"type":"text","text":"%s","size":"sm","color":"#555555","flex":0},{"type":"text","text":"%s筆","size":"sm","color":"#111111","align":"end"}]}`, defect.markid, strconv.Itoa(defect.num)))
+            } else {
+                listItemJson = []byte(fmt.Sprintf(`{"type":"box","layout":"horizontal","contents":[{"type":"text","text":"%s(%s)","size":"sm","color":"#555555","flex":0},{"type":"text","text":"%s筆","size":"sm","color":"#111111","align":"end"}]}`, defectnames[defect.markid], defect.markid, strconv.Itoa(defect.num)))
+            }
+            var listItem interface{}
+            json.Unmarshal(listItemJson, &listItem)
+            dyno.Append(summaryTemplate, listItem, "body", "contents", 3, "contents")
+        }
+        dyno.Append(flex, summaryTemplate, "contents")
+
+        // Detail
         for _, defectDetail := range defectDetails {
             var listItemJson []byte
             var defectTypeName string
@@ -434,20 +453,20 @@ func retriveDefectDetail(id string, arguments []string) []DefectDetail {
     var err error
 
     if contains(arguments, "all") { // Retrive All Types
-        stmt, _ = rtx.Prepare("select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') order by likes desc, marktime, seq_id limit 12")
+        stmt, _ = rtx.Prepare("select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') order by marktime desc, seq_id limit 11")
         rows, err = stmt.Query()
     } else if len(arguments) >= 1 { // Retrive Specific Types
         args := make([]interface{}, len(arguments))
         for i, argument := range arguments {
             args[i] = argument
         }
-        stmt, _ = rtx.Prepare(`select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) order by likes desc, marktime, seq_id limit 12`)
+        stmt, _ = rtx.Prepare(`select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) order by marktime desc, seq_id limit 11`)
         rows, err = stmt.Query(args...)
     } else { // Retrive Subscribed Types
         var all int
         tx.QueryRow("select count(*) from subscriber where `id` = ? and `subscribe` = 'all'", id).Scan(&all)
         if all == 1 {
-            stmt, _ = rtx.Prepare("select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') order by likes desc, marktime, seq_id limit 12")
+            stmt, _ = rtx.Prepare("select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') order by marktime desc, seq_id limit 11")
             rows, err = stmt.Query()
         } else {
             // Get User's Subscribing List and Search
@@ -468,7 +487,7 @@ func retriveDefectDetail(id string, arguments []string) []DefectDetail {
             for i, subscribe := range subscribes {
                 args[i] = subscribe
             }
-            stmt, _ = rtx.Prepare(`select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) order by likes desc, marktime, seq_id limit 12`)
+            stmt, _ = rtx.Prepare(`select seq_id, markid, markdate, marktime, GPS_y, GPS_x, addr, photo_loc from recv where timestamp(markdate, marktime) between convert_tz(date_sub(now(), interval 1 hour), 'system', '+08:00') and convert_tz(now(), 'system', '+08:00') and markid in (?` + strings.Repeat(",?", len(args)-1) + `) order by marktime desc, seq_id limit 11`)
             rows, err = stmt.Query(args...)
         }
     }
@@ -761,6 +780,9 @@ func intialRemoteDatabase() *sql.DB {
 
     db, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", databaseAuth["User"], databaseAuth["Password"], databaseAuth["Host"], 3306, databaseAuth["Name"]))
     checkError(err)
+    db.SetConnMaxLifetime(time.Minute * 3)
+    db.SetMaxOpenConns(10)
+    db.SetMaxIdleConns(10)
     _, err = db.Exec("do 1")
 
     if err != nil {
