@@ -623,6 +623,7 @@ func retriveDefectNum(id string, arguments []string) []Defect {
 func cronJob() {
     cronTabs := strings.Split(os.Getenv("Crontab"), ";")
     cronJob := cron.New()
+    cronJob.AddFunc("* * * * *", DBKeepAlive) // Database keep-alive
     for _, cronTab := range cronTabs {
         cronJob.AddFunc(cronTab, routineJob)
     }
@@ -819,6 +820,12 @@ func intialRemoteDatabase() *sql.DB {
 
     return db
 
+}
+
+func DBKeepAlive() {
+    if err := rdb.Ping(); err != nil {
+        log.Fatal(err)
+    }
 }
 
 func checkError(err error) {
