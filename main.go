@@ -621,7 +621,7 @@ func retriveDefectNum(id string, arguments []string) []Defect {
 func cronJob() {
     cronTabs := strings.Split(os.Getenv("Crontab"), ";")
     cronJob := cron.New()
-    cronJob.AddFunc("* * * * *", DBKeepAlive) // Database keep-alive
+    //cronJob.AddFunc("* * * * *", DBKeepAlive) // Database keep-alive
     for _, cronTab := range cronTabs {
         cronJob.AddFunc(cronTab, routineJob)
     }
