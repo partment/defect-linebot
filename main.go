@@ -176,7 +176,8 @@ func callbackHandler(w http.ResponseWriter, r *http.Request) {
                         return
                     }
 
-                    replyFlexMessage(event, `缺陷詳情`, inspect(id, arguments))
+                    response, _ := inspect(id, arguments)
+                    replyFlexMessage(event, `缺陷詳情`, response)
                     if contains(arguments, "all") {
                         log.Println(fmt.Sprintf("User %s inspected all types of defect.", id))
                         break
@@ -253,7 +254,8 @@ func triggerHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     var err error
-    if _, err = bot.PushMessage(id, linebot.NewFlexMessage("缺陷詳情", inspect(id, args))).Do(); err != nil {
+    response, _ := inspect(id, args)
+    if _, err = bot.PushMessage(id, linebot.NewFlexMessage("缺陷詳情", response)).Do(); err != nil {
         log.Println(err)
     }
 
@@ -369,11 +371,11 @@ func replyAllSubscribe(id string) string {
     return response
 }
 
-func inspect(id string, arguments []string) linebot.FlexContainer {
+func inspect(id string, arguments []string) (linebot.FlexContainer, bool) {
     // Check integrity of arguments
     for _, argument := range arguments {
         if !matchString(`^D\d{2}|all$`, argument) {
-            return nil
+            return nil, false
         }
     }
 
@@ -441,7 +443,7 @@ func inspect(id string, arguments []string) linebot.FlexContainer {
     flexResult, _ := json.Marshal(flex)
     container, _ := linebot.UnmarshalFlexMessageJSON(flexResult)
 
-    return container
+    return container, !(len(defectDetails) == 0)
 }
 
 func retriveDefectDetail(id string, arguments []string) []DefectDetail {
@@ -621,7 +623,7 @@ func retriveDefectNum(id string, arguments []string) []Defect {
 func cronJob() {
     cronTabs := strings.Split(os.Getenv("Crontab"), ";")
     cronJob := cron.New()
-    //cronJob.AddFunc("* * * * *", DBKeepAlive) // Database keep-alive
+    cronJob.AddFunc("* * * * *", DBKeepAlive) // Database keep-alive
     for _, cronTab := range cronTabs {
         cronJob.AddFunc(cronTab, routineJob)
     }
@@ -652,11 +654,13 @@ func routineJob() {
     }
 
     for _, id := range idList {
-        response := inspect(id, []string{})
+        response, sending := inspect(id, []string{})
         message := linebot.NewFlexMessage("缺陷詳情", response)
         var err error
-        if _, err = bot.PushMessage(id, message).Do(); err != nil {
-            log.Println(err)
+        if (os.Getenv("OnlyPushingWhenData") == "true" && sending) || os.Getenv("OnlyPushingWhenData") == "false" {
+            if _, err = bot.PushMessage(id, message).Do(); err != nil {
+                log.Println(fmt.Sprintf(`ID %s is causing "%s", consider delete it in the database manually.`, id, err))
+            }
         }
     }
 }
@@ -709,6 +713,7 @@ func checkENV() bool {
         {"DatabasePassword", reflect.String, ``, false, ``},
         {"DatabaseName", reflect.String, ``, false, ``},
         {"Crontab", reflect.String, `^((((\d+,)+\d+|(\d+(\/|-|#)\d+)|\d+L?|\*(\/\d+)?|L(-\d+)?|\?|[A-Z]{3}(-[A-Z]{3})?) ?){5,7})$|(@(annually|yearly|monthly|weekly|daily|hourly|reboot))|(@every (\d+(ns|us|µs|ms|s|m|h))+)`, true, `;`},
+        {"OnlyPushingWhenData", reflect.String, `^(true|false)$`, false, ``},
     }
 
     for _, env := range envList {
